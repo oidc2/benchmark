@@ -2,7 +2,7 @@
   <span>OIDC² Benchmark</span>
 </mat-toolbar>
 
-<mat-accordion class="example-headers-align" multi>
+<mat-accordion multi>
   <mat-expansion-panel>
     <mat-expansion-panel-header>
       <mat-panel-title>
@@ -24,7 +24,9 @@
         <input matInput formControlName="rounds" min="1" required type="number">
       </mat-form-field>
 
-      <button mat-raised-button color="primary" type="submit" [disabled]="!idtEvaluationFinished">Start</button>
+      <button mat-raised-button color="primary" type="submit" [disabled]="!idtEvaluationFinished">
+        Start
+      </button>
     </form>
 
     <div *ngIf="idtEvaluationStarted">
@@ -67,7 +69,9 @@
         <input matInput formControlName="rounds" min="1" required type="number">
       </mat-form-field>
 
-      <button mat-raised-button color="primary" type="submit" [disabled]="!ictEvaluationFinished">Start</button>
+      <button mat-raised-button color="primary" type="submit" [disabled]="!ictEvaluationFinished">
+        Start
+      </button>
     </form>
       
     <div *ngIf="ictEvaluationStarted">
