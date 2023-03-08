@@ -1,5 +1,18 @@
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Component } from '@angular/core';
 import { FormBuilder, FormControl, Validators } from '@angular/forms';
+import { AuthConfig, OAuthService } from 'angular-oauth2-oidc';
+import * as jose from 'jose';
+
+const authCodeFlowConfig: AuthConfig = {
+  issuer: 'http://op.localhost/realms/iat',
+  redirectUri: window.location.origin + '/index.html',
+  clientId: 'ict-benchmark',
+  responseType: 'code',
+  scope: 'profile e2e_auth_email',
+  requireHttps: false,
+};
+const ictEndpoint: string = 'http://op.localhost/realms/iat/protocol/openid-connect/userinfo/iat';
 
 @Component({
   selector: 'app-root',
@@ -7,6 +20,17 @@ import { FormBuilder, FormControl, Validators } from '@angular/forms';
   styleUrls: ['./app.component.sass']
 })
 export class AppComponent {
+  get authenticated(): boolean {
+    return this.oauthService.hasValidIdToken();
+  }
+  async login(): Promise<void> {
+    this.oauthService.initCodeFlow();
+  }
+  logout(): void {
+    this.oauthService.logOut();
+  }
+
+  readonly typeList: ('ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512')[] = ['ES256', 'ES384', 'ES512', 'RS256', 'RS384', 'RS512'];
   nIdt: number = 0;
   nIct: number = 0;
   get idtRounds(): number {
@@ -19,7 +43,7 @@ export class AppComponent {
     return Number(this.idCertificationTokenOptions.value.rounds);
   }
   get ictTime(): number {
-    return Number(this.idTokenOptions.value.time);
+    return Number(this.idCertificationTokenOptions.value.time);
   }
   idtEvaluationStarted: boolean = false;
   ictEvaluationStarted: boolean = false;
@@ -46,40 +70,260 @@ export class AppComponent {
     if (value == true) {
       this.idCertificationTokenOptions.controls.rounds.enable();
       this.idCertificationTokenOptions.controls.time.enable();
+      this.idCertificationTokenOptions.controls.sigAlg.enable();
     } else {
       this.idCertificationTokenOptions.controls.rounds.disable();
       this.idCertificationTokenOptions.controls.time.disable();
+      this.idCertificationTokenOptions.controls.sigAlg.disable();
     }
+  }
+  get ictSigAlg(): 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512' {
+    return this.idCertificationTokenOptions.value.sigAlg! as 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512';
   }
   idtResults: number[] = [];
   ictResults: number[] = [];
   idTokenOptions = this.formBuilder.group({
-    rounds: new FormControl({value: 20, disabled: !this.ictEvaluationFinished }, Validators.required),
-    time: new FormControl({value: 5, disabled: !this.ictEvaluationFinished }, Validators.required),
+    rounds: new FormControl({
+      value: 20,
+      disabled: !this.idtEvaluationFinished
+    }, Validators.required),
+    time: new FormControl({
+      value: 5,
+      disabled: !this.idtEvaluationFinished
+    }, Validators.required),
   });
   idCertificationTokenOptions = this.formBuilder.group({
-    rounds: new FormControl({value: 20, disabled: !this.ictEvaluationFinished }, Validators.required),
-    time: new FormControl({value: 5, disabled: !this.ictEvaluationFinished }, Validators.required),
+    rounds: new FormControl({
+      value: 20,
+      disabled: !this.ictEvaluationFinished
+    }, Validators.required),
+    time: new FormControl({
+      value: 5,
+      disabled: !this.ictEvaluationFinished
+    }, Validators.required),
+    sigAlg: new FormControl({
+      value: 'SHA-256',
+      disabled: !this.ictEvaluationFinished
+    }, Validators.required),
   });
 
-  constructor(private readonly formBuilder: FormBuilder) {}
+  constructor(
+    private readonly formBuilder: FormBuilder,
+    private readonly oauthService: OAuthService,
+    private readonly httpService: HttpClient,
+  ) {
+    this.oauthService.configure(authCodeFlowConfig);
+    this.oauthService.loadDiscoveryDocumentAndTryLogin().then(() => console.log('OIDC loaded'));
+  }
 
-  private async requestIdToken(): Promise<void> {
-    // TODO: Request ID Token here.
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, Math.random() * 1000);
+  private getKey(type: 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512', publicKey: JsonWebKey): jose.JWTHeaderParameters {
+    switch (type) {
+      case 'ES256':
+        return { alg: 'ES256',  'type': 'JWT', 'jwk': { 'kty': 'EC', 'crv': 'P-256', 'x': publicKey.x, 'y': publicKey.y} };
+      case 'ES384':
+        return { alg: 'ES384',  'type': 'JWT', 'jwk': { 'kty': 'EC', 'crv': 'P-384', 'x': publicKey.x, 'y': publicKey.y} };
+      case 'ES512':
+        return { alg: 'ES512',  'type': 'JWT', 'jwk': { 'kty': 'EC', 'crv': 'P-512', 'x': publicKey.x, 'y': publicKey.y} };
+      case 'RS256':
+        return { alg: 'RS256',  'type': 'JWT', 'jwk': { 'kty': 'RSA', 'e': publicKey.e, 'n': publicKey.n} };
+      case 'RS384':
+        return { alg: 'RS384',  'type': 'JWT', 'jwk': { 'kty': 'RSA', 'e': publicKey.e, 'n': publicKey.n} };
+      case 'RS512':
+        return { alg: 'RS512',  'type': 'JWT', 'jwk': { 'kty': 'RSA', 'e': publicKey.e, 'n': publicKey.n} };
+    }
+  }
+  private generateKey(type: 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512'): Promise<CryptoKeyPair> {
+    switch (type) {
+      case 'ES256':
+        return window.crypto.subtle.generateKey(
+          {
+            name: "ECDSA",
+            namedCurve: "P-256",
+          },
+          false,
+          ["sign", "verify"],
+        );
+      case 'ES384':
+        return window.crypto.subtle.generateKey(
+          {
+            name: "ECDSA",
+            namedCurve: "P-384",
+          },
+          false,
+          ["sign", "verify"],
+        );
+      case 'ES512':
+        return window.crypto.subtle.generateKey(
+          {
+            name: "ECDSA",
+            namedCurve: "P-512",
+          },
+          false,
+          ["sign", "verify"],
+        );
+      case 'RS256':
+        return window.crypto.subtle.generateKey(
+          {
+            name: 'RSASSA-PKCS1-v1_5',
+            modulusLength: 2048,
+            publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
+            hash: 'SHA-256'
+          },
+          false,
+          ["sign", "verify"]
+        );
+      case 'RS384':
+        return window.crypto.subtle.generateKey(
+          {
+            name: 'RSASSA-PKCS1-v1_5',
+            modulusLength: 3072,
+            publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
+            hash: 'SHA-384'
+          },
+          false,
+          ["sign", "verify"]
+        );
+      case 'RS512':
+        return window.crypto.subtle.generateKey(
+          {
+            name: 'RSASSA-PKCS1-v1_5',
+            modulusLength: 4096,
+            publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
+            hash: 'SHA-512'
+          },
+          false,
+          ["sign", "verify"]
+        );
+    }
+  }
+
+  /**
+   * generate a JWT used to request an OpenIdToken
+   * @Params
+   * "keyPair" is the key used by the avvount that wants to authenticate
+   * "tokenClaims" are the claims present in the openId Token
+   * "tokenNonce" is the nonce in the openId token
+   * "tokenLifetime" is how long the token should be valid in seconds
+   * @usedWith
+   * generateTokenRequest ganerates a request token with can be used with the function: requestRemoteIdToken from this lib
+   */
+  private async generateTokenRequest(type: 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512', keyPair: CryptoKeyPair, iss: string, sub: string, aud: string, iat: number, nbf: number, exp: number, nonce: number, tokenClaims: string[], tokenNonce: string, tokenLifetime: number): Promise<string> {
+    let claimsString = ""
+    for (let i = 0; i < tokenClaims.length; i++) {
+      claimsString += tokenClaims[i]
+      if (i != tokenClaims.length - 1) {
+        claimsString += " "
+      }
+    }
+
+    let publicKeyExp = await window.crypto.subtle.exportKey(
+        "jwk",
+        keyPair.publicKey,
+    );
+
+    const jwtBody =
+    {
+      "sub": sub,
+      "nbf": nbf,
+      "nonce": nonce,
+      "token_claims": claimsString,
+      "token_lifetime": tokenLifetime,
+      "token_nonce": tokenNonce
+    }
+
+    const protectHeader = this.getKey(type, publicKeyExp);
+
+    return await new jose.SignJWT(jwtBody)
+      .setProtectedHeader(protectHeader)
+      .setIssuedAt(iat)
+      .setIssuer(iss)
+      .setAudience(aud)
+      .setExpirationTime(exp)
+      .sign(keyPair.privateKey)
+  }
+  private async requestRemoteIdToken(accessToken: string, requestToken: string, ridtEndpointUri: string): Promise<string> {
+    const header = new Headers();
+
+    header.append('accept', 'application/json');
+    header.append('Authorization',  'Bearer ' + accessToken)
+    header.append('Content-Type', 'application/jwt')
+
+    const message = {
+      method: 'POST',
+      headers: header,
+      body: requestToken
+    };
+
+    const myRequest = new Request(ridtEndpointUri);
+
+    var response = await fetch(myRequest, message)
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+    var body = await response.text()
+
+    return body
+  }
+
+  /**
+   * Requests an ID Token.
+   * @returns A promise which resolves when an ID Token was received.
+   */
+  private requestIdToken(): Promise<void> {
+    const refreshToken = this.oauthService.getRefreshToken();
+    const tokenEndpoint = this.oauthService.tokenEndpoint!;
+    const parameters = new HttpParams()
+      .set('grant_type', 'refresh_token')
+      .set('refresh_token', refreshToken);
+    const basicAuth = btoa(`${authCodeFlowConfig.clientId!}:`);
+    const headers = new HttpHeaders().set('Authorization', 'Basic ' + basicAuth);
+
+    return new Promise((resolve, reject) => {
+      const subscription = this.httpService.post(tokenEndpoint, parameters, {
+        headers: headers
+      }).subscribe((value) => {
+        if (value.hasOwnProperty('refresh_token')) {
+          subscription.unsubscribe();
+          resolve();
+        } else {
+          reject('No refresh token found!');
+        }
+      });
     });
   }
-  private async requestIdCertificationToken(): Promise<void> {
-    // TODO: Request ID Certification Token here.
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, Math.random() * 2000);
-    });
+  /**
+   * Requests an ID Certification Token.
+   */
+  private async requestIdCertificationToken(type: 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512', keyPair: CryptoKeyPair): Promise<void> {
+    const accessToken = this.oauthService.getAccessToken()!;
+    const claims = this.oauthService.getIdentityClaims()!;
+    const subjectClaim = claims['sub']!;
+    const now = Math.floor(Date.now() / 1000);
+    const exp = now + 10;
+    const nonce = Math.round(Math.random() * 1000000);
+    const tokenNonce = window.crypto.randomUUID();
+    const tokenLifetime = 36000000;
+
+    const irt = await this.generateTokenRequest(
+      type,
+      keyPair,
+      authCodeFlowConfig.issuer!,
+      subjectClaim,
+      authCodeFlowConfig.issuer!,
+      now,
+      now,
+      exp,
+      nonce,
+      ['name', 'given_name', 'family_name'],
+      tokenNonce,
+      tokenLifetime
+    );
+    const ict = await this.requestRemoteIdToken(accessToken, irt, ictEndpoint);
+    if (!ict) {
+      throw 'Received empty ICT';
+    }
   }
+
   async startIdToken(): Promise<void> {
     console.log(`Starting ID Token benchmark with ${this.idtRounds} rounds and ${this.idtTime} seconds ...`);
 
@@ -129,6 +373,10 @@ export class AppComponent {
     this.ictEvaluationFinished = false;
     this.ictResults.length = 0;
 
+    const type = this.ictSigAlg;
+
+    console.log(`nict: ${this.nIct} | ictRounds: ${this.ictRounds} rounds: ${this.idCertificationTokenOptions.value.rounds}`);
+
     // Loop over rounds.
     for (this.nIct = 0; this.nIct < this.ictRounds; this.nIct++) {
       console.log(`Starting ID Certification Token benchmark round ${this.nIct + 1} ...`);
@@ -144,9 +392,11 @@ export class AppComponent {
           resolve(value);
         }, this.ictTime * 1000);
 
+        const keyPair = await this.generateKey(type);  
+
         // Loop over ID Token requests.
         while (!expired) {
-          await this.requestIdCertificationToken();
+          await this.requestIdCertificationToken(type, keyPair);
           value++;
         }
       });
@@ -183,6 +433,6 @@ export class AppComponent {
     this.downloadData(this.idtResults, 'idt.tsv');
   }
   downloadIctData(): void {
-    this.downloadData(this.ictResults, 'ict.tsv');
+    this.downloadData(this.ictResults, `ict_${this.ictSigAlg.toLowerCase()}.tsv`);
   }
 }

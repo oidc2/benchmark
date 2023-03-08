@@ -1,5 +1,8 @@
 <mat-toolbar color="primary">
   <span>OIDC² Benchmark</span>
+  <span class="spacer"></span>
+  <button *ngIf="!authenticated" mat-stroked-button (click)="login()">Login</button>
+  <button *ngIf="authenticated" mat-stroked-button (click)="logout()">Logout</button>
 </mat-toolbar>
 
 <mat-accordion multi>
@@ -67,6 +70,13 @@
       <mat-form-field>
         <mat-label>Rounds</mat-label>
         <input matInput formControlName="rounds" min="1" required type="number">
+      </mat-form-field>
+
+      <mat-form-field>
+        <mat-label>Signature Algorithm</mat-label>
+        <mat-select formControlName="sigAlg">
+          <mat-option *ngFor="let sigAlg of typeList" [value]="sigAlg">{{sigAlg}}</mat-option>
+        </mat-select>
       </mat-form-field>
 
       <button mat-raised-button color="primary" type="submit" [disabled]="!ictEvaluationFinished">
