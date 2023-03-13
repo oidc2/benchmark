@@ -1,9 +1,21 @@
 <mat-toolbar color="primary">
   <span>OIDC² Benchmark</span>
   <span class="spacer"></span>
+  <span *ngIf="authenticated">{{ username }}</span>
   <button *ngIf="!authenticated" mat-stroked-button (click)="login()">Login</button>
   <button *ngIf="authenticated" mat-stroked-button (click)="logout()">Logout</button>
 </mat-toolbar>
+
+<div>
+  <mat-form-field style="width: 500px">
+    <mat-label>Issuer</mat-label>
+    <input matInput required type="url" [(ngModel)]="issuer">
+  </mat-form-field>
+
+  <button mat-raised-button color="primary" type="submit" [disabled]="!idtEvaluationFinished" (click)="applyIssuer()">
+    Apply
+  </button>
+</div>
 
 <mat-accordion multi>
   <mat-expansion-panel>

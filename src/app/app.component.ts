@@ -1,18 +1,20 @@
-import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+// import { HttpClient } from '@angular/common/http';
 import { Component } from '@angular/core';
 import { FormBuilder, FormControl, Validators } from '@angular/forms';
 import { AuthConfig, OAuthService } from 'angular-oauth2-oidc';
 import * as jose from 'jose';
 
-const authCodeFlowConfig: AuthConfig = {
-  issuer: 'http://op.localhost/realms/ict',
-  redirectUri: window.location.origin + '/index.html',
-  clientId: 'ict-benchmark',
-  responseType: 'code',
-  scope: 'profile e2e_auth_email',
-  requireHttps: false,
-};
-const ictEndpoint: string = 'http://op.localhost/realms/ict/protocol/openid-connect/userinfo/ict';
+// const authCodeFlowConfig: AuthConfig = {
+//   issuer: 'http://op.localhost/realms/ict',
+//   // issuer: 'http://op2.localhost/application/o/ict-benchmark',
+//   redirectUri: window.location.origin + '/index.html',
+//   clientId: 'ict-benchmark',
+//   responseType: 'code',
+//   scope: 'profile e2e_auth_email',
+//   requireHttps: false,
+//   skipIssuerCheck: true,
+//   strictDiscoveryDocumentValidation: false,
+// };
 
 @Component({
   selector: 'app-root',
@@ -20,6 +22,31 @@ const ictEndpoint: string = 'http://op.localhost/realms/ict/protocol/openid-conn
   styleUrls: ['./app.component.sass']
 })
 export class AppComponent {
+  // issuer: string = 'http://op.localhost/realms/ict';
+  get issuer(): string {
+    return localStorage.getItem('app_issuer') ?? 'http://op.localhost/realms/ict';
+  }
+  set issuer(value: string) {
+    localStorage.setItem('app_issuer', value);
+  }
+  get username(): string {
+    const claims = this.oauthService.getIdentityClaims();
+    return `${(claims['preferred_username'] ?? '[unknown_user]')}@${(claims['iss'] ?? '[unknown_iss]')}`;
+  }
+  get authCodeFlowConfig(): AuthConfig {
+    return {
+      issuer: this.issuer,
+      // issuer: 'http://op.localhost/realms/ict',
+      // issuer: 'http://op2.localhost/application/o/ict-benchmark',
+      redirectUri: window.location.origin + '/index.html',
+      clientId: 'ict-benchmark',
+      responseType: 'code',
+      scope: 'profile e2e_auth_email',
+      requireHttps: false,
+      skipIssuerCheck: true,
+      strictDiscoveryDocumentValidation: false,
+    };
+  }
   get authenticated(): boolean {
     return this.oauthService.hasValidIdToken();
   }
@@ -110,10 +137,21 @@ export class AppComponent {
   constructor(
     private readonly formBuilder: FormBuilder,
     private readonly oauthService: OAuthService,
-    private readonly httpService: HttpClient,
+    // private readonly httpService: HttpClient,
   ) {
-    this.oauthService.configure(authCodeFlowConfig);
-    this.oauthService.loadDiscoveryDocumentAndTryLogin().then(() => console.log('OIDC loaded'));
+    this.applyIssuer().then(() => console.log('OIDC loaded'));
+  }
+
+  async applyIssuer(): Promise<void> {
+    const wasAuthenticated = this.authenticated;
+    if (wasAuthenticated) {
+      this.logout();
+    }
+    this.oauthService.configure(this.authCodeFlowConfig);
+    await this.oauthService.loadDiscoveryDocumentAndTryLogin();
+    if (wasAuthenticated) {
+      await this.login();
+    }
   }
 
   private getKey(type: 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512', publicKey: JsonWebKey): jose.JWTHeaderParameters {
@@ -269,27 +307,29 @@ export class AppComponent {
    * Requests an ID Token.
    * @returns A promise which resolves when an ID Token was received.
    */
-  private requestIdToken(): Promise<void> {
-    const refreshToken = this.oauthService.getRefreshToken();
-    const tokenEndpoint = this.oauthService.tokenEndpoint!;
-    const parameters = new HttpParams()
-      .set('grant_type', 'refresh_token')
-      .set('refresh_token', refreshToken);
-    const basicAuth = btoa(`${authCodeFlowConfig.clientId!}:`);
-    const headers = new HttpHeaders().set('Authorization', 'Basic ' + basicAuth);
+  private async requestIdToken(): Promise<void> {
+    // const refreshToken = this.oauthService.getRefreshToken();
+    // const tokenEndpoint = this.oauthService.tokenEndpoint!;
+    // const parameters = new HttpParams()
+    //   .set('grant_type', 'refresh_token')
+    //   .set('refresh_token', refreshToken);
+    // const basicAuth = btoa(`${authCodeFlowConfig.clientId!}:`);
+    // const headers = new HttpHeaders().set('Authorization', 'Basic ' + basicAuth);
 
-    return new Promise((resolve, reject) => {
-      const subscription = this.httpService.post(tokenEndpoint, parameters, {
-        headers: headers
-      }).subscribe((value) => {
-        if (value.hasOwnProperty('refresh_token')) {
-          subscription.unsubscribe();
-          resolve();
-        } else {
-          reject('No refresh token found!');
-        }
-      });
-    });
+    await this.oauthService.refreshToken();
+
+    // return new Promise((resolve, reject) => {
+    //   const subscription = this.httpService.post(tokenEndpoint, parameters, {
+    //     headers: headers
+    //   }).subscribe((value) => {
+    //     if (value.hasOwnProperty('refresh_token')) {
+    //       subscription.unsubscribe();
+    //       resolve();
+    //     } else {
+    //       reject('No refresh token found!');
+    //     }
+    //   });
+    // });
   }
   /**
    * Requests an ID Certification Token.
@@ -298,6 +338,7 @@ export class AppComponent {
     const accessToken = this.oauthService.getAccessToken()!;
     const claims = this.oauthService.getIdentityClaims()!;
     const subjectClaim = claims['sub']!;
+    const issuerClaim = claims['iss']!;
     const now = Math.floor(Date.now() / 1000);
     const exp = now + 10;
     const nonce = Math.round(Math.random() * 1000000);
@@ -307,9 +348,9 @@ export class AppComponent {
     const irt = await this.generateTokenRequest(
       type,
       keyPair,
-      authCodeFlowConfig.issuer!,
+      this.authCodeFlowConfig.issuer!,
       subjectClaim,
-      authCodeFlowConfig.issuer!,
+      issuerClaim,
       now,
       now,
       exp,
@@ -318,7 +359,8 @@ export class AppComponent {
       tokenNonce,
       tokenLifetime
     );
-    const ict = await this.requestRemoteIdToken(accessToken, irt, ictEndpoint);
+    const userinfo = this.oauthService.userinfoEndpoint + (this.oauthService.userinfoEndpoint?.endsWith('/') ? '' : '/');
+    const ict = await this.requestRemoteIdToken(accessToken, irt, `${userinfo}ict`);
     if (!ict) {
       throw 'Received empty ICT';
     }
@@ -352,6 +394,12 @@ export class AppComponent {
           await this.requestIdToken();
           value++;
         }
+      });
+
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          resolve();
+        }, 1000);
       });
 
       console.log(`Result of ID Token benchmark round ${this.nIdt + 1} is ${result}`)
