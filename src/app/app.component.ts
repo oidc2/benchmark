@@ -5,14 +5,14 @@ import { AuthConfig, OAuthService } from 'angular-oauth2-oidc';
 import * as jose from 'jose';
 
 const authCodeFlowConfig: AuthConfig = {
-  issuer: 'http://op.localhost/realms/iat',
+  issuer: 'http://op.localhost/realms/ict',
   redirectUri: window.location.origin + '/index.html',
   clientId: 'ict-benchmark',
   responseType: 'code',
   scope: 'profile e2e_auth_email',
   requireHttps: false,
 };
-const ictEndpoint: string = 'http://op.localhost/realms/iat/protocol/openid-connect/userinfo/iat';
+const ictEndpoint: string = 'http://op.localhost/realms/ict/protocol/openid-connect/userinfo/ict';
 
 @Component({
   selector: 'app-root',
