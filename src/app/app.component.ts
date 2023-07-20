@@ -245,7 +245,7 @@ export class AppComponent {
    * @usedWith
    * generateTokenRequest ganerates a request token with can be used with the function: requestRemoteIdToken from this lib
    */
-  private async generateTokenRequest(type: 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512', keyPair: CryptoKeyPair, iss: string, sub: string, aud: string, iat: number, nbf: number, exp: number, nonce: number, tokenClaims: string[], tokenNonce: string, tokenLifetime: number): Promise<string> {
+  private async generateTokenRequest(type: 'ES256' | 'ES384' | 'ES512' | 'RS256' | 'RS384' | 'RS512', keyPair: CryptoKeyPair, iss: string, sub: string, aud: string, iat: number, nbf: number, exp: number, nonce: string, tokenClaims: string[], tokenNonce: string, tokenLifetime: number): Promise<string> {
     let claimsString = ""
     for (let i = 0; i < tokenClaims.length; i++) {
       claimsString += tokenClaims[i]
@@ -341,7 +341,7 @@ export class AppComponent {
     const issuerClaim = claims['iss']!;
     const now = Math.floor(Date.now() / 1000);
     const exp = now + 10;
-    const nonce = Math.round(Math.random() * 1000000);
+    const nonce = Math.round(Math.random() * 1000000).toString();
     const tokenNonce = window.crypto.randomUUID();
     const tokenLifetime = 36000000;
 
